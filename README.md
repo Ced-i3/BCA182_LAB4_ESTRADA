@@ -2,7 +2,7 @@
 
 ## Build
 
-PlatformIO, STM32Cube HAL, and ST-LINK are configured in `platformio.ini`. With PlatformIO on PATH, run `pio run`. On this machine PlatformIO Core 6.2.0 was run from `%USERPROFILE%\.platformio\penv\Scripts\platformio.exe` with `PLATFORMIO_CORE_DIR` temporarily set to `%USERPROFILE%\.platformio`; the inherited `C:\PIO_TOOLS` location denied lock-file access in the sandbox. Installed platform ststm32 19.7.1, STM32CubeF4 1.28.1 and GCC ARM 7.2.1 built successfully. The framework package supplies the FreeRTOS kernel; no downloaded library or cloud service is required. Build output: 10,240 bytes flash and 16,876 bytes main SRAM. No firmware was flashed.
+PlatformIO, STM32Cube HAL, and ST-LINK are configured in `platformio.ini`. With PlatformIO on PATH, run `pio run`. On this machine PlatformIO Core 6.2.0 was run from `%USERPROFILE%\.platformio\penv\Scripts\platformio.exe` with `PLATFORMIO_CORE_DIR` temporarily set to `%USERPROFILE%\.platformio`; the inherited `C:\PIO_TOOLS` location denied lock-file access in the sandbox. Installed platform ststm32 19.7.1, STM32CubeF4 1.28.1 and GCC ARM 7.2.1 built successfully. The framework package supplies the FreeRTOS kernel; no downloaded library or cloud service is required. Build output: 10,240 bytes flash and 16,876 bytes main SRAM.
 
 The board manifest targets STM32F407ZGT6, 1 MiB flash, 128 KiB main SRAM. The chip also has 64 KiB CCM, which the default linker memory region does not include. The MCU match does not imply generic board pin compatibility.
 
@@ -18,6 +18,8 @@ The FreeRTOS GCC ARM_CM4F port uses a 1 kHz tick, 16 KiB heap_4 heap, and stack-
 
 ## Hardware validation still required
 
-After separate authorization to flash, verify board revision, oscillator, clock and UART baud; LED and button polarity; independent task timing; stack margins; I2C pull-ups and waveforms; and sensor ACKs and actual identities. The current probes do not prove which device acknowledged. Verify bus behavior when a sensor is absent or a line is held low. No hardware tests were performed.
+The Milestone 1 image was uploaded with authorization and OpenOCD verified it. COM4 at 115200 baud repeatedly reported ACKs at `0x1E` and `0x68`, and no ACK at `0x69`; PF11's output register changed between two SWD samples. These observations do not establish sensor identity or visible LED behavior.
+
+Still verify board revision, oscillator and clock; visible LED and button responses; independent task timing; stack margins; I2C pull-ups and waveforms; actual sensor identities and readings; and bus behavior when a sensor is absent or a line is held low. Obtain separate authorization before uploading modified firmware. See the [implementation plan](docs/SmartGuard_Implementation_Plan.md) for the sensor-first sequence and later matrix design.
 
 Sources: [RT-Thread Spark BSP](https://github.com/RT-Thread/rt-thread/blob/master/bsp/stm32/stm32f407-rt-spark/README_EN.md), [board BSP sensor configuration](https://github.com/RT-Thread/rt-thread/blob/master/bsp/stm32/stm32f407-rt-spark/board/Kconfig), [Spark schematic](https://www.rt-thread.org/document/site/rt-thread-version/rt-thread-standard/hw-board/spark-1/SCH_Spark-1_V1_0.pdf).
