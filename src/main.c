@@ -3,6 +3,7 @@
 #include "task.h"
 #include <stdio.h>
 #include <string.h>
+#include "sensors.h"
 
 static UART_HandleTypeDef uart;
 void xPortSysTickHandler(void);
@@ -35,46 +36,77 @@ static void peripherals_init(void) {
     g.Pin = GPIO_PIN_9 | GPIO_PIN_10; g.Mode = GPIO_MODE_AF_PP; g.Pull = GPIO_PULLUP; g.Speed = GPIO_SPEED_FREQ_VERY_HIGH; g.Alternate = GPIO_AF7_USART1; HAL_GPIO_Init(GPIOA, &g);
     uart.Instance = USART1; uart.Init.BaudRate = 115200; uart.Init.WordLength = UART_WORDLENGTH_8B; uart.Init.StopBits = UART_STOPBITS_1; uart.Init.Parity = UART_PARITY_NONE; uart.Init.Mode = UART_MODE_TX_RX; uart.Init.HwFlowCtl = UART_HWCONTROL_NONE; uart.Init.OverSampling = UART_OVERSAMPLING_16;
     if (HAL_UART_Init(&uart) != HAL_OK) fail();
-    HAL_GPIO_WritePin(GPIOF, GPIO_PIN_0 | GPIO_PIN_1, GPIO_PIN_SET);
-    g.Pin = GPIO_PIN_0 | GPIO_PIN_1; g.Mode = GPIO_MODE_OUTPUT_OD; g.Pull = GPIO_NOPULL; g.Speed = GPIO_SPEED_FREQ_LOW; HAL_GPIO_Init(GPIOF, &g);
-    CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk; DWT->CYCCNT = 0; DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
+    sensor_bus_init();
 }
-static void bus_delay(void) { uint32_t start = DWT->CYCCNT; while ((uint32_t)(DWT->CYCCNT - start) < SystemCoreClock / 100000U) {} }
-static void line(uint16_t pin, GPIO_PinState state) { HAL_GPIO_WritePin(GPIOF, pin, state); bus_delay(); }
-static int scl_high(void) {
-    HAL_GPIO_WritePin(GPIOF, GPIO_PIN_1, GPIO_PIN_SET);
-    uint32_t start = DWT->CYCCNT;
-    while (HAL_GPIO_ReadPin(GPIOF, GPIO_PIN_1) == GPIO_PIN_RESET) if ((uint32_t)(DWT->CYCCNT - start) > SystemCoreClock / 1000U) return 0;
-    bus_delay(); return 1;
+static TaskHandle_t heartbeat_handle, button_handle, sensor_handle;
+static volatile uint8_t button_state;
+static void heartbeat_task(void *arg) {
+    (void)arg; TickType_t wake = xTaskGetTickCount();
+    for (;;) { HAL_GPIO_TogglePin(GPIOF, GPIO_PIN_11); vTaskDelayUntil(&wake, pdMS_TO_TICKS(500)); }
 }
-/* Address ACK only: it does not establish device identity. */
-static int probe(uint8_t address) {
-    line(GPIO_PIN_0, GPIO_PIN_SET); if (!scl_high() || HAL_GPIO_ReadPin(GPIOF, GPIO_PIN_0) == GPIO_PIN_RESET) return -1;
-    line(GPIO_PIN_0, GPIO_PIN_RESET); line(GPIO_PIN_1, GPIO_PIN_RESET);
-    uint8_t byte = (uint8_t)(address << 1);
-    for (int i = 0; i < 8; ++i) {
-        line(GPIO_PIN_0, (byte & 0x80U) ? GPIO_PIN_SET : GPIO_PIN_RESET);
-        if (!scl_high()) return -1;
-        line(GPIO_PIN_1, GPIO_PIN_RESET); byte <<= 1;
+static void button_task(void *arg) {
+    (void)arg; TickType_t wake = xTaskGetTickCount();
+    for (;;) {
+        uint32_t pins = GPIOC->IDR;
+        button_state = (uint8_t)(((pins & GPIO_PIN_5) == 0U ? 1U : 0U) |
+                                 ((pins & GPIO_PIN_1) == 0U ? 2U : 0U) |
+                                 ((pins & GPIO_PIN_0) == 0U ? 4U : 0U) |
+                                 ((pins & GPIO_PIN_4) == 0U ? 8U : 0U));
+        HAL_GPIO_WritePin(GPIOF, GPIO_PIN_12, button_state ? GPIO_PIN_RESET : GPIO_PIN_SET);
+        vTaskDelayUntil(&wake, pdMS_TO_TICKS(50));
     }
-    line(GPIO_PIN_0, GPIO_PIN_SET); if (!scl_high()) return -1;
-    int ack = HAL_GPIO_ReadPin(GPIOF, GPIO_PIN_0) == GPIO_PIN_RESET;
-    line(GPIO_PIN_1, GPIO_PIN_RESET); line(GPIO_PIN_0, GPIO_PIN_RESET);
-    if (!scl_high()) return -1;
-    line(GPIO_PIN_0, GPIO_PIN_SET); return ack;
 }
-static void heartbeat_task(void *arg) { (void)arg; for (;;) { HAL_GPIO_TogglePin(GPIOF, GPIO_PIN_11); vTaskDelay(pdMS_TO_TICKS(500)); } }
-static void button_task(void *arg) { (void)arg; for (;;) { GPIO_PinState pressed = (GPIOC->IDR & (GPIO_PIN_0 | GPIO_PIN_1 | GPIO_PIN_4 | GPIO_PIN_5)) != (GPIO_PIN_0 | GPIO_PIN_1 | GPIO_PIN_4 | GPIO_PIN_5) ? GPIO_PIN_RESET : GPIO_PIN_SET; HAL_GPIO_WritePin(GPIOF, GPIO_PIN_12, pressed); vTaskDelay(pdMS_TO_TICKS(50)); } }
-static void sensor_task(void *arg) { (void)arg; char msg[120]; for (;;) {
-    int ap = probe(0x1e), imu68 = probe(0x68), imu69 = probe(0x69);
-    int n = snprintf(msg, sizeof msg, "SmartGuard ACK AP@1E=%d IMU@68=%d IMU@69=%d (-1=bus error)\r\n", ap, imu68, imu69);
-    if (n > 0 && n < (int)sizeof msg) HAL_UART_Transmit(&uart, (uint8_t *)msg, (uint16_t)n, 100);
-    vTaskDelay(pdMS_TO_TICKS(2000));
-} }
+static void send_line(const char *text) {
+    size_t length = strlen(text);
+    if (length) (void)HAL_UART_Transmit(&uart, (const uint8_t *)text, (uint16_t)length, 100);
+}
+/* Fixed-point formatting avoids requiring float printf support. */
+static void fixed3(char *out, size_t n, int32_t value) {
+    uint32_t mag = value < 0 ? (uint32_t)(-value) : (uint32_t)value;
+    (void)snprintf(out, n, "%s%lu.%03lu", value < 0 ? "-" : "", (unsigned long)(mag / 1000U), (unsigned long)(mag % 1000U));
+}
+static void sensor_task(void *arg) {
+    (void)arg;
+    TickType_t wake = xTaskGetTickCount(), previous = wake;
+    unsigned cycle = 0; uint8_t last_buttons = 0xffU; int imu_ready = 0, ap_ready = 0;
+    uint8_t who = 0; sensor_status_t is = SENSOR_CONFIG, as = SENSOR_CONFIG;
+    char linebuf[220], ax[16], ay[16], az[16], gx[16], gy[16], gz[16], lux[16];
+    send_line("SmartGuard sensor diagnostics; tick_ms=1 period_ms=500; values uncalibrated\r\n");
+    for (;;) {
+        TickType_t now = xTaskGetTickCount();
+        unsigned long elapsed = (unsigned long)((now - previous) * portTICK_PERIOD_MS); previous = now;
+        /* Reinitialize failed devices at a bounded 2.5-second interval. */
+        if (!imu_ready && cycle % 5U == 0U) { is = imu_init(&who); imu_ready = is == SENSOR_OK; }
+        if (!ap_ready && cycle % 5U == 0U) { as = optical_init(); ap_ready = as == SENSOR_OK; }
+        imu_sample_t imu; optical_sample_t optical;
+        if (imu_ready) { is = imu_read(&imu); if (is != SENSOR_OK) imu_ready = 0; }
+        if (ap_ready) { as = optical_read(&optical); if (as != SENSOR_OK && as != SENSOR_OVERFLOW) ap_ready = 0; }
+        if (is == SENSOR_OK && imu_ready) {
+            fixed3(ax, sizeof ax, (int32_t)imu.accel[0]*1000/16384); fixed3(ay, sizeof ay, (int32_t)imu.accel[1]*1000/16384); fixed3(az, sizeof az, (int32_t)imu.accel[2]*1000/16384);
+            fixed3(gx, sizeof gx, (int32_t)imu.gyro[0]*1000/131); fixed3(gy, sizeof gy, (int32_t)imu.gyro[1]*1000/131); fixed3(gz, sizeof gz, (int32_t)imu.gyro[2]*1000/131);
+            snprintf(linebuf, sizeof linebuf, "t_ms=%lu dt_ms=%lu IMU who=0x%02X accel_g=%s,%s,%s gyro_dps=%s,%s,%s\r\n", (unsigned long)(now * portTICK_PERIOD_MS), elapsed, who, ax, ay, az, gx, gy, gz);
+        } else snprintf(linebuf, sizeof linebuf, "t_ms=%lu dt_ms=%lu IMU invalid=%s who=0x%02X\r\n", (unsigned long)(now * portTICK_PERIOD_MS), elapsed, sensor_status_name(is), who);
+        send_line(linebuf);
+        if (as == SENSOR_OK || as == SENSOR_OVERFLOW) {
+            /* 23360 lux full scale / 65536 counts, rounded to millilux. */
+            fixed3(lux, sizeof lux, (int32_t)(((uint32_t)optical.light_raw * 23360000ULL) / 65536U));
+            if (as == SENSOR_OK) snprintf(linebuf, sizeof linebuf, "t_ms=%lu AP lux=%s als_raw=%u prox_raw=%u object=%u\r\n", (unsigned long)(now * portTICK_PERIOD_MS), lux, optical.light_raw, optical.proximity_raw, optical.object);
+            else snprintf(linebuf, sizeof linebuf, "t_ms=%lu AP lux=%s als_raw=%u prox=invalid:%s\r\n", (unsigned long)(now * portTICK_PERIOD_MS), lux, optical.light_raw, sensor_status_name(as));
+        } else snprintf(linebuf, sizeof linebuf, "t_ms=%lu AP invalid=%s\r\n", (unsigned long)(now * portTICK_PERIOD_MS), sensor_status_name(as));
+        send_line(linebuf);
+        uint8_t buttons = button_state;
+        if (cycle % 10U == 0U || buttons != last_buttons) {
+            last_buttons = buttons;
+            snprintf(linebuf, sizeof linebuf, "t_ms=%lu buttons up=%u down=%u left=%u right=%u stack_words heartbeat=%lu buttons=%lu sensor=%lu heap_free=%lu heap_min=%lu\r\n", (unsigned long)(now * portTICK_PERIOD_MS), !!(buttons&1U), !!(buttons&2U), !!(buttons&4U), !!(buttons&8U), (unsigned long)uxTaskGetStackHighWaterMark(heartbeat_handle), (unsigned long)uxTaskGetStackHighWaterMark(button_handle), (unsigned long)uxTaskGetStackHighWaterMark(sensor_handle), (unsigned long)xPortGetFreeHeapSize(), (unsigned long)xPortGetMinimumEverFreeHeapSize());
+            send_line(linebuf);
+        }
+        ++cycle; vTaskDelayUntil(&wake, pdMS_TO_TICKS(500));
+    }
+}
 int main(void) {
     HAL_Init(); clock_init(); peripherals_init();
-    if (xTaskCreate(heartbeat_task, "heartbeat", 256, NULL, 1, NULL) != pdPASS ||
-        xTaskCreate(button_task, "buttons", 256, NULL, 2, NULL) != pdPASS ||
-        xTaskCreate(sensor_task, "sensors", 512, NULL, 1, NULL) != pdPASS) fail();
+    if (xTaskCreate(heartbeat_task, "heartbeat", 256, NULL, 1, &heartbeat_handle) != pdPASS ||
+        xTaskCreate(button_task, "buttons", 256, NULL, 2, &button_handle) != pdPASS ||
+        xTaskCreate(sensor_task, "sensors", 768, NULL, 1, &sensor_handle) != pdPASS) fail();
     vTaskStartScheduler(); fail();
 }
