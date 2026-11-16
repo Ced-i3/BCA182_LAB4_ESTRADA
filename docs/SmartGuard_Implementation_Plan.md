@@ -1,10 +1,10 @@
-﻿# SmartGuard implementation plan
+# SmartGuard implementation plan
 
 This is a design and resource allocation, not an implemented or hardware-verified matrix driver. Continue existing board verification and IMU diagnostics before the matrix milestone. No external disco LEDs are planned.
 
 ## Current evidence and priority
 
-The Milestone 1 image was built, uploaded through ST-LINK and verified by OpenOCD. COM4 at 115200 baud repeatedly reported `AP@1E=1 IMU@68=1 IMU@69=0`; these are address acknowledgements, not identity checks or measurements. PF11's output register changed between two SWD samples, but visible LED behavior and button responses were not observed by the developer. Confirm the four buttons and LED behavior with a person at the board. Read the ICM20608 WHO_AM_I register and obtain actual accelerometer and gyro readings, with units, timing and error reporting, before advancing. The AP3216C register map examined does not provide a unique chip ID; use documented register behavior and physical inspection without claiming definitive electronic identification. Prepare any firmware changes for separate approval before flashing.
+The Milestone 1 image was built, uploaded through ST-LINK and verified by OpenOCD. COM4 at 115200 baud repeatedly reported `AP@1E=1 IMU@68=1 IMU@69=0`; these are address acknowledgements, not identity checks or measurements. PF11's output register changed between two SWD samples, but visible LED behavior has not been confirmed. Subsequent diagnostics observed IMU WHO_AM_I 0xAF, actual accelerometer and gyro readings, optical response and individual button press/release flags; see [hardware test results](Hardware_Test_2026-11-17.md). Validate timing, calibration and fault behavior further before treating acquisition as reliable. The AP3216C register map examined does not provide a unique chip ID; use documented register behavior and physical inspection without claiming definitive electronic identification. Prepare any firmware changes for separate approval before flashing.
 
 ## Verified design references and limits
 
@@ -43,7 +43,7 @@ ALARM is a design state only; do not enable product alarm behavior during curren
 
 ## Milestone order and verification
 
-1. Finish physical heartbeat/button observations and reliable sensor diagnostics: identify the IMU, capture real accel/gyro readings, validate timing and failures, and record actual evidence. Preserve the current scope and request approval for each modified firmware upload.
+1. Finish visible heartbeat observations and reliable sensor diagnostics: validate calibration, timing and failures and record actual evidence. Preserve the current scope and request approval for each modified firmware upload.
 2. Separately implement the matrix driver and TIM1 buzzer allocation with small, meaningful commits. First build and review, then obtain approval before flashing. Verify LED order, colors, off/startup behavior, pulse timing and latch interval, DMA errors and task stack margins. Measure power at capped brightness.
 3. Exercise matrix, buzzer, LCD, buttons and sensor acquisition together. Confirm LCD routing and timer/DMA resource ownership, task responsiveness and timing under simultaneous operation, fault behavior, and no regressions in the sensor data. Only claim coexistence after physical testing.
 4. Continue product and ML work only after sensor diagnostics and this independent matrix milestone are reliable. No model training is part of this plan update.

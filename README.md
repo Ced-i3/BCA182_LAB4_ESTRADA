@@ -1,8 +1,8 @@
-﻿# SmartGuard Milestone 1
+ï»¿# SmartGuard Milestone 1
 
 ## Build
 
-PlatformIO, STM32Cube HAL, and ST-LINK are configured in `platformio.ini`. With PlatformIO on PATH, run `pio run`. On this machine PlatformIO Core 6.2.0 was run from `%USERPROFILE%\.platformio\penv\Scripts\platformio.exe` with `PLATFORMIO_CORE_DIR` temporarily set to `%USERPROFILE%\.platformio`; the inherited `C:\PIO_TOOLS` location denied lock-file access in the sandbox. Installed platform ststm32 19.7.1, STM32CubeF4 1.28.1 and GCC ARM 7.2.1 built successfully. The framework package supplies the FreeRTOS kernel; no downloaded library or cloud service is required. Build output: 10,240 bytes flash and 16,876 bytes main SRAM.
+PlatformIO, STM32Cube HAL, and ST-LINK are configured in `platformio.ini`. With PlatformIO on PATH, run `pio run`. On this machine PlatformIO Core 6.2.0 was run from `%USERPROFILE%\.platformio\penv\Scripts\platformio.exe` with `PLATFORMIO_CORE_DIR` temporarily set to `%USERPROFILE%\.platformio`; the inherited `C:\PIO_TOOLS` location denied lock-file access in the sandbox. Installed platform ststm32 19.7.1, STM32CubeF4 1.28.1 and GCC ARM 7.2.1 built successfully. The framework package supplies the FreeRTOS kernel; no downloaded library or cloud service is required. Milestone 1 build output: 10,240 bytes flash and 16,876 bytes main SRAM; the sensor diagnostics build reported 12,564 bytes flash and 16,892 bytes main SRAM.
 
 The board manifest targets STM32F407ZGT6, 1 MiB flash, 128 KiB main SRAM. The chip also has 64 KiB CCM, which the default linker memory region does not include. The MCU match does not imply generic board pin compatibility.
 
@@ -20,6 +20,8 @@ The FreeRTOS GCC ARM_CM4F port uses a 1 kHz tick, 16 KiB heap_4 heap, and stack-
 
 The Milestone 1 image was uploaded with authorization and OpenOCD verified it. COM4 at 115200 baud repeatedly reported ACKs at `0x1E` and `0x68`, and no ACK at `0x69`; PF11's output register changed between two SWD samples. These observations do not establish sensor identity or visible LED behavior.
 
-Still verify board revision, oscillator and clock; visible LED and button responses; independent task timing; stack margins; I2C pull-ups and waveforms; actual sensor identities and readings; and bus behavior when a sensor is absent or a line is held low. Obtain separate authorization before uploading modified firmware. See the [implementation plan](docs/SmartGuard_Implementation_Plan.md) for the sensor-first sequence and later matrix design.
+Sensor diagnostics were subsequently flashed with authorization and tested: the IMU reported WHO_AM_I `0xAF` and responded to tilt and movement; optical readings responded to light and proximity changes; and all four button flags asserted and released individually. See the [hardware test report](docs/Hardware_Test_2026-11-17.md) for observed values and the correction to the initial untested button result.
+
+Still verify board revision, oscillator and clock; visible LED responses; independent timing and stress-case stack margins; I2C pull-ups and waveforms; sensor calibration; and bus behavior when a sensor is absent or a line is held low. Obtain separate authorization before uploading modified firmware. See the [implementation plan](docs/SmartGuard_Implementation_Plan.md) for the sensor-first sequence and later matrix design.
 
 Sources: [RT-Thread Spark BSP](https://github.com/RT-Thread/rt-thread/blob/master/bsp/stm32/stm32f407-rt-spark/README_EN.md), [board BSP sensor configuration](https://github.com/RT-Thread/rt-thread/blob/master/bsp/stm32/stm32f407-rt-spark/board/Kconfig), [Spark schematic](https://www.rt-thread.org/document/site/rt-thread-version/rt-thread-standard/hw-board/spark-1/SCH_Spark-1_V1_0.pdf).
